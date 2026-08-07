@@ -1,0 +1,83 @@
+name: EvoSeed Evolution Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      goal:
+        description: 'Evolution goal'
+        required: true
+        default: 'Improve EvoSeed while preserving existing behavior.'
+      max_candidates:
+        description: 'Maximum candidate proposals for this run'
+        required: true
+        default: '3'
+
+permissions:
+  contents: read
+
+jobs:
+  evolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install project
+        run: python -m pip install -e .
+
+      - name: Run baseline tests
+        run: python -m pytest -q
+
+      - name: Ask OpenAI for a bounded proposal
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          EVOSEED_GOAL: ${{ inputs.goal }}
+          EVOSEED_MAX_CANDIDATES: ${{ inputs.max_candidates }}
+        run: python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          key = os.environ.get('OPENAI_API_KEY')
+          if not key:
+              raise SystemExit('OPENAI_API_KEY repository secret is not configured')
+
+          goal = os.environ.get('EVOSEED_GOAL', '')
+          max_candidates = os.environ.get('EVOSEED_MAX_CANDIDATES', '3')
+          payload = {
+              'model': 'gpt-4o-mini',
+              'input': (
+                  'You are the proposal stage of EvoSeed. Propose bounded software '
+                  'improvements only. Do not request credentials, network access, '
+                  'deployment, or unrestricted self-modification. Return concise JSON '
+                  'with keys: goal, rationale, candidate_changes. Goal: ' + goal +
+                  '. Maximum candidates: ' + max_candidates
+              ),
+          }
+          request = urllib.request.Request(
+              'https://api.openai.com/v1/responses',
+              data=json.dumps(payload).encode(),
+              headers={
+                  'Authorization': f'Bearer {key}',
+                  'Content-Type': 'application/json',
+              },
+              method='POST',
+          )
+          with urllib.request.urlopen(request, timeout=60) as response:
+              result = json.load(response)
+          with open('evolution-proposal.json', 'w', encoding='utf-8') as handle:
+              json.dump(result, handle, ensure_ascii=False, indent=2)
+          print('AI proposal generated successfully.')
+          PY
+
+      - name: Publish proposal artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: evoseed-proposal
+          path: evolution-proposal.json
