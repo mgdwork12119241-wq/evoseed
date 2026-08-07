@@ -1,0 +1,19 @@
+version: 1
+project:
+  name: evoseed
+  mode: bounded-evolution
+
+rules:
+  max_files_per_mutation: 10
+  minimum_score: 50
+  require_tests: true
+  never_modify_main_directly: true
+  rollback_on_failure: true
+
+stages:
+  - propose
+  - isolate
+  - mutate
+  - test
+  - evaluate
+  - accept
